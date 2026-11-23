@@ -12,13 +12,13 @@ An end-to-end system to predict lapse (non-payment and termination) of protectio
 
 | Exit criterion | Status |
 |---|---|
-| Structured Python repository (not notebook-only) | Foundations in place |
-| Meaningful automated tests and consistent Git use | In progress: 1 test, branch-based workflow started |
-| Reproducible training and evaluation | Groundwork: locked environment, seeded data generation |
+| Structured Python repository (not notebook-only) | Foundations in place; package code in `src/lapse/` |
+| Meaningful automated tests and consistent Git use | In progress: 5 tests; feature branch and first pull request |
+| Reproducible training and evaluation | Groundwork: locked environment, seeded data generation with determinism tests |
 | Documented decisions, metrics and limitations | In progress: this log |
 
-**Current milestone:** Week 1, Part B (policy generator v1 and tests)
-**Next step:** determinism, validity and invalid-input tests; first pull request
+**Current milestone:** Week 1 complete on merge of PR #1
+**Next step:** Generator v2 (30 Nov–6 Dec)
 
 ## Phase 1 schedule (revised 23 Nov 2026)
 
@@ -47,6 +47,7 @@ The original 12-week schedule started 2 Nov 2026. After a three-week pause, scop
 | 23 Nov 2026 | Feature-branch workflow with pull requests into `main` | `main` stays in a working state; each change is reviewed before merging |
 | 23 Nov 2026 | Generator v1 limited to five static policy fields | Establishes the generator and testing pattern before adding modelling complexity |
 | 23 Nov 2026 | Behavioural signals (missed payments, contacts, amendments) to be stored in a dated events table, not as fields on the policy table | Counts such as "missed payments in the last year" depend on a reference date. Storing raw dated events allows features to be computed strictly before the prediction date, so leakage can be prevented and tested. Missed payments are closely linked to lapse itself and are the main leakage risk |
+| 23 Nov 2026 | Code written with AI assistance; all code reviewed, run and explained before merging | Focus on system design, verification and the ability to explain and defend every line |
 
 ## Session log
 
@@ -81,6 +82,10 @@ The original 12-week schedule started 2 Nov 2026. After a three-week pause, scop
 - Added the first test: correct row count.
 - Pre-commit reformatted two files (line joining, final newline); changes reviewed with `git diff` before committing.
 - Noted pandas 3 behaviour: text columns use the `str` dtype, and datetimes use microsecond resolution (`datetime64[us]`).
+- Added tests: determinism (same seed gives identical output; different seed gives different output), value ranges (unique IDs, age bounds, positive premiums, allowed product types) and input validation (`n_policies < 1` raises `ValueError`). 5 tests passing.
+- Verified the determinism test by removing the seed: the same-seed test failed as expected; the different-seed test passed, showing that each test covers a different failure mode.
+- Ruff flagged a duplicated test function (F811). Python silently overrides duplicate definitions, so a test would otherwise have been lost without warning.
+- Opened PR #1 (`feat/policy-generator` into `main`).
 
 **Known limitations (v1):** premium is independent of age and product; no policy term, sum assured, payment details or outcome yet.
 
