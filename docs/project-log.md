@@ -48,6 +48,8 @@ The original 12-week schedule started 2 Nov 2026. After a three-week pause, scop
 | 23 Nov 2026 | Generator v1 limited to five static policy fields | Establishes the generator and testing pattern before adding modelling complexity |
 | 23 Nov 2026 | Behavioural signals (missed payments, contacts, amendments) to be stored in a dated events table, not as fields on the policy table | Counts such as "missed payments in the last year" depend on a reference date. Storing raw dated events allows features to be computed strictly before the prediction date, so leakage can be prevented and tested. Missed payments are closely linked to lapse itself and are the main leakage risk |
 | 23 Nov 2026 | Code written with AI assistance; all code reviewed, run and explained before merging | Focus on system design, verification and the ability to explain and defend every line |
+| 25 Nov 2026 | Premium derived from cover, age and product rather than drawn at random | Produces realistic relationships for the lapse model to learn; resolves the v1 limitation |
+| 25 Nov 2026 | Behaviour tests assert a minimum margin, not only a direction | A direction-only assertion can pass by chance when the effect is absent; confirmed by sabotage check |
 
 ## Session log
 
@@ -90,3 +92,12 @@ The original 12-week schedule started 2 Nov 2026. After a three-week pause, scop
 **Known limitations (v1):** premium is independent of age and product; no policy term, sum assured, payment details or outcome yet.
 
 **Planned for v2:** `term_years`, `sum_assured`, `premium_frequency`, `payment_method`, `broker_code`, `lapse_date`, one or two features with no signal, and an events table (`missed_payment`, `amendment`, `contact`).
+
+### 25 Nov 2026: Generator v2, part 1 (policy fields and pricing)
+
+- Split generator v2 into three pull requests: policy fields and pricing (#2), lapse outcome (#3), events table (#4).
+- Added fields: `term_years`, `sum_assured`, `premium_frequency`, `payment_method`, `broker_code`, `region`.
+- Replaced the random premium with a pricing formula: cover x base rate x age factor (about 6% per year of age) x product factor (income protection 2.5, term life 1.0, mortgage protection 0.8) x lognormal noise.
+- `region` deliberately carries no signal and serves as a control feature. `broker_code` has no effect until the lapse mechanism is added.
+- Added tests: explicit schema (column names and order), extended value ranges, and behaviour tests for age-based and product-based pricing. Introduced a shared pytest fixture. 8 tests passing.
+- Sabotage check (age effect set to zero) showed the original age test passed by chance: the two medians differed by 0.00003. Added margins (older at least 2x younger; product ratios of 1.5x and 1.1x), set well below the designed effects. The test then failed as expected under sabotage.
