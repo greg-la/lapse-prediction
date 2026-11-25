@@ -17,8 +17,8 @@ An end-to-end system to predict lapse (non-payment and termination) of protectio
 | Reproducible training and evaluation | Groundwork: locked environment, seeded data generation with determinism tests |
 | Documented decisions, metrics and limitations | In progress: this log |
 
-**Current milestone:** Week 1 complete on merge of PR #1
-**Next step:** Generator v2 (30 Nov–6 Dec)
+**Current milestone:** Generator v2, PR #2 (policy fields and pricing)
+**Next step:** PR #3, lapse outcome
 
 ## Phase 1 schedule (revised 23 Nov 2026)
 
@@ -50,6 +50,10 @@ The original 12-week schedule started 2 Nov 2026. After a three-week pause, scop
 | 23 Nov 2026 | Code written with AI assistance; all code reviewed, run and explained before merging | Focus on system design, verification and the ability to explain and defend every line |
 | 25 Nov 2026 | Premium derived from cover, age and product rather than drawn at random | Produces realistic relationships for the lapse model to learn; resolves the v1 limitation |
 | 25 Nov 2026 | Behaviour tests assert a minimum margin, not only a direction | A direction-only assertion can pass by chance when the effect is absent; confirmed by sabotage check |
+| 25 Nov 2026 | Lapse generated as a monthly risk from policy start to an observation end date of 31 Dec 2025; policies still in force are censored (no `lapse_date`) | Mirrors a real data extract; makes duration effects possible; censoring must be handled in problem framing |
+| 25 Nov 2026 | Lapse drivers (multipliers on monthly risk): duration baseline about 12% / 9% / 6% annual for years 1 / 2 / 3+; monthly payment 1.5x; card 1.4x; mortgage protection 0.7x, income protection 1.2x; about 1.2x per doubling of premium; random broker effects (about 0.75x–1.35x); region and age no direct effect | Invented, round assumptions based on general reasoning; each will be a named constant and covered by a behaviour test |
+| 25 Nov 2026 | Hidden per-policy financial-pressure score drives both lapse and missed payments; stored as an internal column and excluded from model features, enforced by a test | Makes missed payments predictive of lapse without encoding the outcome directly |
+| 25 Nov 2026 | Events table to hold four event types: `missed_payment`, `contact`, `amendment`, `indexation`. `amendment` is cut first if the work overruns | Indexation is a recognised lapse trigger; days since an event is computed at snapshot time, not stored as a field |
 
 ## Session log
 
