@@ -16,7 +16,7 @@ MIN_AGE = 18
 MAX_AGE = 65  # inclusive
 TERM_OPTIONS = (10, 15, 20, 25, 30)
 START_DATE_MIN = pd.Timestamp("2018-01-01")
-START_DATE_SPAN_DAYS = 6 * 365  # roughly 2018-2023
+START_DATE_SPAN_DAYS = 8 * 365  # new business written from 2018 to end of 2025
 
 PREMIUM_FREQUENCIES = ("monthly", "annual")
 PREMIUM_FREQUENCY_PROBS = (0.8, 0.2)
@@ -30,9 +30,28 @@ BASE_RATE_PER_1000 = 1.2  # annual premium per 1,000 of cover at age 40 (invente
 AGE_RATE_GROWTH = 0.06  # premium rises about 6% per year of age (invented)
 PREMIUM_NOISE_SIGMA = 0.15
 
+# Lapse simulation (invented; see docs/project-log.md, decision record).
+OBSERVATION_END = pd.Timestamp("2025-12-31")  # date of the simulated data extract
+DAYS_PER_MONTH = 365.25 / 12
+BASE_ANNUAL_LAPSE_BY_YEAR = (0.12, 0.09, 0.06)  # policy years 1, 2, 3 onwards
+FREQUENCY_LAPSE_FACTOR = {"monthly": 1.5, "annual": 1.0}
+PAYMENT_LAPSE_FACTOR = {"direct_debit": 1.0, "card": 1.4}
+PRODUCT_LAPSE_FACTOR = {"term_life": 1.0, "income_protection": 1.2, "mortgage_protection": 0.7}
+PREMIUM_LAPSE_FACTOR_PER_DOUBLING = 1.2
+PREMIUM_REFERENCE = 250.0  # premium at which the premium effect is 1.0x
+BROKER_EFFECT_SIGMA = 0.15  # most brokers between about 0.75x and 1.35x
+PRESSURE_SIGMA = 0.35  # hidden pressure mostly between about 0.5x and 2x
+
+INTERNAL_PREFIX = "_"  # columns used only inside the simulation; never model features
+
 
 def generate_policies(n_policies: int, seed: int) -> pd.DataFrame:
-    """Return one row per synthetic policy. Same seed -> same output."""
+    """Return one row per synthetic policy. Same seed -> same output.
+
+    Includes `lapse_date` (NaT if still in force at OBSERVATION_END) and the
+    internal column `_latent_pressure`. Use `drop_internal_columns` before any
+    modelling.
+    """
     if n_policies < 1:
         raise ValueError("n_policies must be at least 1")
 
@@ -52,7 +71,7 @@ def generate_policies(n_policies: int, seed: int) -> pd.DataFrame:
     broker_code = rng.choice(BROKER_CODES, size=n)
     region = rng.choice(REGIONS, size=n, p=REGION_PROBS)  # deliberately no signal
 
-    return pd.DataFrame(
+    policies = pd.DataFrame(
         {
             "policy_id": policy_id,
             "start_date": start_date,
@@ -67,6 +86,14 @@ def generate_policies(n_policies: int, seed: int) -> pd.DataFrame:
             "region": region,
         }
     )
+    policies["_latent_pressure"] = rng.lognormal(mean=0.0, sigma=PRESSURE_SIGMA, size=n)
+    policies["lapse_date"] = _simulate_lapse_dates(policies, rng)
+    return policies
+
+
+def drop_internal_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Remove simulation-only columns (prefixed '_') that a model must never see."""
+    return df.drop(columns=[c for c in df.columns if c.startswith(INTERNAL_PREFIX)])
 
 
 def _price_premium(
@@ -81,3 +108,49 @@ def _price_premium(
     noise = rng.lognormal(mean=0.0, sigma=PREMIUM_NOISE_SIGMA, size=len(age))
     premium = sum_assured / 1000 * BASE_RATE_PER_1000 * age_factor * product_factor * noise
     return np.round(premium, 2)
+
+
+def _simulate_lapse_dates(policies: pd.DataFrame, rng: np.random.Generator) -> pd.Series:
+    """Simulate lapse month by month from start date to OBSERVATION_END.
+
+    Monthly risk = baseline for the policy year x product of driver multipliers.
+    Policies still in force at OBSERVATION_END get NaT (censored).
+    """
+    n = len(policies)
+    broker_effect = dict(
+        zip(
+            BROKER_CODES,
+            rng.lognormal(mean=0.0, sigma=BROKER_EFFECT_SIGMA, size=len(BROKER_CODES)),
+            strict=True,
+        )
+    )
+    premium_exponent = np.log2(PREMIUM_LAPSE_FACTOR_PER_DOUBLING)
+
+    multiplier = (
+        policies["premium_frequency"].map(FREQUENCY_LAPSE_FACTOR)
+        * policies["payment_method"].map(PAYMENT_LAPSE_FACTOR)
+        * policies["product_type"].map(PRODUCT_LAPSE_FACTOR)
+        * (policies["annual_premium"] / PREMIUM_REFERENCE) ** premium_exponent
+        * policies["broker_code"].map(broker_effect)
+        * policies["_latent_pressure"]
+    ).to_numpy()
+
+    days_observed = (OBSERVATION_END - policies["start_date"]).dt.days.to_numpy()
+    months_observed = np.floor(days_observed / DAYS_PER_MONTH).astype(int)
+    max_months = max(int(months_observed.max()), 1)
+
+    month_index = np.arange(max_months)
+    policy_year = np.minimum(month_index // 12, len(BASE_ANNUAL_LAPSE_BY_YEAR) - 1)
+    annual_base = np.asarray(BASE_ANNUAL_LAPSE_BY_YEAR)[policy_year]
+    monthly_base = 1 - (1 - annual_base) ** (1 / 12)
+
+    hazard = np.minimum(multiplier[:, None] * monthly_base[None, :], 1.0)
+    at_risk = month_index[None, :] < months_observed[:, None]
+    lapses = (rng.random((n, max_months)) < hazard) & at_risk
+
+    has_lapsed = lapses.any(axis=1)
+    first_lapse_month = lapses.argmax(axis=1)  # first True per row; 0 if none
+    days_to_lapse = np.where(has_lapsed, np.floor((first_lapse_month + 1) * DAYS_PER_MONTH), np.nan)
+    return policies["start_date"] + pd.to_timedelta(
+        pd.Series(days_to_lapse, index=policies.index), unit="D"
+    )
